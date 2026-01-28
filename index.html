@@ -967,11 +967,160 @@
             convertBtn.disabled = false;
         }
 
-        // Word 转 PDF - 改进版，更好地保留格式
+        // Word 字体映射表 - 将 Word 字体映射到浏览器可用字体
+        const fontMapping = {
+            // 中文字体映射
+            'SimSun': ['SimSun', '宋体', 'Noto Serif CJK SC', 'STSong', 'serif'],
+            '宋体': ['SimSun', '宋体', 'Noto Serif CJK SC', 'STSong', 'serif'],
+            'SimHei': ['SimHei', '黑体', 'Noto Sans CJK SC', 'STHeiti', 'sans-serif'],
+            '黑体': ['SimHei', '黑体', 'Noto Sans CJK SC', 'STHeiti', 'sans-serif'],
+            'Microsoft YaHei': ['Microsoft YaHei', '微软雅黑', 'Noto Sans CJK SC', 'PingFang SC', 'sans-serif'],
+            '微软雅黑': ['Microsoft YaHei', '微软雅黑', 'Noto Sans CJK SC', 'PingFang SC', 'sans-serif'],
+            'KaiTi': ['KaiTi', '楷体', 'STKaiti', 'BiauKai', 'serif'],
+            '楷体': ['KaiTi', '楷体', 'STKaiti', 'BiauKai', 'serif'],
+            'FangSong': ['FangSong', '仿宋', 'STFangsong', 'serif'],
+            '仿宋': ['FangSong', '仿宋', 'STFangsong', 'serif'],
+            'LiSu': ['LiSu', '隶书', 'STLiti', 'serif'],
+            '隶书': ['LiSu', '隶书', 'STLiti', 'serif'],
+            'YouYuan': ['YouYuan', '幼圆', 'STYuanti', 'sans-serif'],
+            '幼圆': ['YouYuan', '幼圆', 'STYuanti', 'sans-serif'],
+            // 英文字体映射
+            'Times New Roman': ['Times New Roman', 'Times', 'Georgia', 'serif'],
+            'Arial': ['Arial', 'Helvetica', 'Roboto', 'sans-serif'],
+            'Calibri': ['Calibri', 'Segoe UI', 'Arial', 'sans-serif'],
+            'Verdana': ['Verdana', 'Geneva', 'Tahoma', 'sans-serif'],
+            'Courier New': ['Courier New', 'Courier', 'Consolas', 'monospace'],
+            'Georgia': ['Georgia', 'Times New Roman', 'Times', 'serif'],
+            'Tahoma': ['Tahoma', 'Geneva', 'Verdana', 'sans-serif']
+        };
+
+        // 解析 Word 文档获取样式信息
+        async function extractWordStyles(arrayBuffer) {
+            const styles = {
+                defaultFont: 'SimSun, 宋体, serif',
+                defaultSize: '12pt',
+                paragraphStyles: new Map()
+            };
+
+            try {
+                // 使用 JSZip 解压 docx 文件
+                const zip = await JSZip.loadAsync(arrayBuffer);
+                
+                // 读取 styles.xml 获取默认样式
+                const stylesXml = await zip.file('word/styles.xml')?.async('text');
+                if (stylesXml) {
+                    const parser = new DOMParser();
+                    const stylesDoc = parser.parseFromString(stylesXml, 'application/xml');
+                    
+                    // 提取默认字体
+                    const defaultFontNode = stylesDoc.querySelector('w\:rFonts[w\:ascii], rFonts[ascii]');
+                    if (defaultFontNode) {
+                        const asciiFont = defaultFontNode.getAttribute('w:ascii') || defaultFontNode.getAttribute('ascii');
+                        const eastAsiaFont = defaultFontNode.getAttribute('w:eastAsia') || defaultFontNode.getAttribute('eastAsia');
+                        if (eastAsiaFont || asciiFont) {
+                            styles.defaultFont = mapFont(eastAsiaFont || asciiFont);
+                        }
+                    }
+                    
+                    // 提取默认字号
+                    const defaultSizeNode = stylesDoc.querySelector('w\:sz[w\:val], sz[val]');
+                    if (defaultSizeNode) {
+                        const sizeVal = defaultSizeNode.getAttribute('w:val') || defaultSizeNode.getAttribute('val');
+                        if (sizeVal) {
+                            styles.defaultSize = (parseInt(sizeVal) / 2) + 'pt';
+                        }
+                    }
+                }
+
+                // 读取 document.xml 获取段落级别的样式
+                const documentXml = await zip.file('word/document.xml')?.async('text');
+                if (documentXml) {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(documentXml, 'application/xml');
+                    
+                    // 提取所有段落的字体信息
+                    const paragraphs = doc.querySelectorAll('w\:p, p');
+                    paragraphs.forEach((p, index) => {
+                        const pStyle = {
+                            font: styles.defaultFont,
+                            size: styles.defaultSize,
+                            bold: false,
+                            italic: false,
+                            alignment: 'left'
+                        };
+                        
+                        // 获取段落的对齐方式
+                        const jc = p.querySelector('w\:jc, jc');
+                        if (jc) {
+                            const align = jc.getAttribute('w:val') || jc.getAttribute('val');
+                            if (align === 'center') pStyle.alignment = 'center';
+                            else if (align === 'right') pStyle.alignment = 'right';
+                            else if (align === 'both') pStyle.alignment = 'justify';
+                        }
+                        
+                        // 获取 run 级别的样式
+                        const r = p.querySelector('w\:r, r');
+                        if (r) {
+                            const rFonts = r.querySelector('w\:rFonts, rFonts');
+                            if (rFonts) {
+                                const ascii = rFonts.getAttribute('w:ascii') || rFonts.getAttribute('ascii');
+                                const eastAsia = rFonts.getAttribute('w:eastAsia') || rFonts.getAttribute('eastAsia');
+                                pStyle.font = mapFont(eastAsia || ascii || styles.defaultFont);
+                            }
+                            
+                            const sz = r.querySelector('w\:sz, sz');
+                            if (sz) {
+                                const val = sz.getAttribute('w:val') || sz.getAttribute('val');
+                                if (val) pStyle.size = (parseInt(val) / 2) + 'pt';
+                            }
+                            
+                            // 检查粗体和斜体
+                            if (r.querySelector('w\:b, b')) pStyle.bold = true;
+                            if (r.querySelector('w\:i, i')) pStyle.italic = true;
+                        }
+                        
+                        styles.paragraphStyles.set(index, pStyle);
+                    });
+                }
+            } catch (e) {
+                console.warn('提取 Word 样式失败，使用默认样式:', e);
+            }
+            
+            return styles;
+        }
+
+        // 字体映射函数
+        function mapFont(wordFont) {
+            if (!wordFont) return 'SimSun, 宋体, serif';
+            
+            // 清理字体名
+            const cleanFont = wordFont.trim().replace(/['"]/g, '');
+            
+            // 查找映射
+            for (const [key, fonts] of Object.entries(fontMapping)) {
+                if (cleanFont.toLowerCase() === key.toLowerCase() || 
+                    cleanFont.includes(key)) {
+                    return fonts.join(', ');
+                }
+            }
+            
+            // 如果是中文字体名，添加回退
+            if (/[\u4e00-\u9fa5]/.test(cleanFont)) {
+                return `${cleanFont}, SimSun, 宋体, Noto Serif CJK SC, serif`;
+            }
+            
+            // 默认返回原字体名加回退
+            return `${cleanFont}, SimSun, 宋体, serif`;
+        }
+
+        // Word 转 PDF - 改进版，更好地保留格式和字体
         async function convertWordToPDF(file, options) {
             try {
                 // 读取 Word 文件
                 const arrayBuffer = await file.arrayBuffer();
+                
+                // 提取 Word 样式信息
+                const wordStyles = options.keepFonts ? await extractWordStyles(arrayBuffer) : null;
                 
                 // 使用 mammoth 提取 HTML，保留更多样式信息
                 const result = await mammoth.convertToHtml({ 
@@ -1001,13 +1150,44 @@
                     ]
                 });
 
-                // 提取样式信息
-                const styleResult = await mammoth.extractRawText({ arrayBuffer });
-                
                 // 渲染 HTML 到隐藏容器，应用样式类
                 let styledHTML = result.value;
                 
-                // 处理段落样式
+                // 处理内联样式保留
+                if (options.keepFonts && wordStyles) {
+                    // 为每个元素应用提取的字体样式
+                    styledHTML = styledHTML.replace(/<p([^>]*)>/g, (match, attrs) => {
+                        const hasStyle = attrs.includes('style=');
+                        const fontStyle = `font-family: ${wordStyles.defaultFont}; font-size: ${wordStyles.defaultSize};`;
+                        if (hasStyle) {
+                            return match.replace('style="', `style="${fontStyle} `);
+                        }
+                        return `<p style="${fontStyle}"${attrs}>`;
+                    });
+                    
+                    // 处理标题字体
+                    styledHTML = styledHTML.replace(/<h1([^>]*)>/g, (match, attrs) => {
+                        const hasStyle = attrs.includes('style=');
+                        const headingFont = wordStyles.defaultFont.replace('SimSun, 宋体', 'SimHei, 黑体');
+                        const fontStyle = `font-family: ${headingFont};`;
+                        if (hasStyle) {
+                            return match.replace('style="', `style="${fontStyle} `);
+                        }
+                        return `<h1 style="${fontStyle}"${attrs}>`;
+                    });
+                    
+                    styledHTML = styledHTML.replace(/<h2([^>]*)>/g, (match, attrs) => {
+                        const hasStyle = attrs.includes('style=');
+                        const headingFont = wordStyles.defaultFont.replace('SimSun, 宋体', 'SimHei, 黑体');
+                        const fontStyle = `font-family: ${headingFont};`;
+                        if (hasStyle) {
+                            return match.replace('style="', `style="${fontStyle} `);
+                        }
+                        return `<h2 style="${fontStyle}"${attrs}>`;
+                    });
+                }
+                
+                // 处理段落样式类
                 styledHTML = styledHTML.replace(/<p>/g, '<p class="docx-paragraph">');
                 styledHTML = styledHTML.replace(/<h1>/g, '<h1 class="docx-heading1">');
                 styledHTML = styledHTML.replace(/<h2>/g, '<h2 class="docx-heading2">');
@@ -1032,30 +1212,39 @@
                     });
                 }
 
+                // 设置渲染容器的字体
+                const containerFont = wordStyles ? wordStyles.defaultFont : 'SimSun, 宋体, serif';
+                
                 renderContainer.innerHTML = `
-                    <div style="padding: 40px 60px;">
+                    <div style="padding: 40px 60px; font-family: ${containerFont};">
                         ${styledHTML}
                     </div>
                 `;
 
-                // 等待图片加载
+                // 等待字体和图片加载
+                await waitForFonts(renderContainer, containerFont);
                 if (options.keepImages) {
                     await waitForImages(renderContainer);
                 }
+                
+                // 额外等待确保字体渲染完成
+                await new Promise(resolve => setTimeout(resolve, 500));
 
                 // 使用 html2canvas 将内容转为高质量图片
                 const canvas = await html2canvas(renderContainer, {
-                    scale: 2.5,  // 提高分辨率
+                    scale: 3,  // 提高分辨率以获得更清晰的文字
                     useCORS: true,
                     logging: false,
                     windowWidth: 794,
                     windowHeight: renderContainer.scrollHeight,
-                    backgroundColor: '#ffffff'
+                    backgroundColor: '#ffffff',
+                    letterRendering: true,  // 改善文字渲染
+                    font: containerFont
                 });
 
                 // 创建 PDF
                 const { jsPDF } = window.jspdf;
-                const imgData = canvas.toDataURL('image/jpeg', 0.95);  // 高质量 JPEG
+                const imgData = canvas.toDataURL('image/jpeg', 0.98);  // 最高质量 JPEG
                 
                 const imgWidth = 210; // A4 宽度 mm
                 const pageHeight = 297; // A4 高度 mm
@@ -1093,6 +1282,30 @@
             } catch (error) {
                 throw new Error('Word 转 PDF 失败: ' + error.message);
             }
+        }
+
+        // 等待字体加载完成
+        async function waitForFonts(container, fontFamily) {
+            return new Promise((resolve) => {
+                if (document.fonts && document.fonts.ready) {
+                    document.fonts.ready.then(() => {
+                        // 额外检查特定字体
+                        const fonts = fontFamily.split(',').map(f => f.trim().replace(/['"]/g, ''));
+                        const checkPromises = fonts.map(font => {
+                            if (document.fonts.check) {
+                                return document.fonts.check(`12pt "${font}"`);
+                            }
+                            return Promise.resolve(true);
+                        });
+                        Promise.all(checkPromises).then(() => {
+                            setTimeout(resolve, 200); // 额外等待确保渲染
+                        }).catch(() => resolve());
+                    });
+                } else {
+                    // 浏览器不支持 Font Loading API，使用超时回退
+                    setTimeout(resolve, 1000);
+                }
+            });
         }
 
         // 等待图片加载完成
