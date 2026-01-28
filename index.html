@@ -1133,16 +1133,16 @@
                         });
                     }),
                     styleMap: [
-                        "p[style-name='Title'] => h1.docx-title",
-                        "p[style-name='Heading 1'] => h1.docx-heading1",
-                        "p[style-name='Heading 2'] => h2.docx-heading2",
-                        "p[style-name='Heading 3'] => h3.docx-heading3",
-                        "p[style-name='Heading 4'] => h4.docx-heading3",
-                        "p => p.docx-paragraph",
-                        "b => strong.docx-bold",
-                        "i => em.docx-italic",
-                        "u => span.docx-underline",
-                        "strike => span.docx-strike",
+                        "p[style-name='Title'] => h1",
+                        "p[style-name='Heading 1'] => h1",
+                        "p[style-name='Heading 2'] => h2",
+                        "p[style-name='Heading 3'] => h3",
+                        "p[style-name='Heading 4'] => h4",
+                        "p => p",
+                        "b => strong",
+                        "i => em",
+                        "u => u",
+                        "strike => s",
                         "table => table",
                         "tr => tr",
                         "td => td",
@@ -1150,104 +1150,84 @@
                     ]
                 });
 
-                // 渲染 HTML 到隐藏容器，应用样式类
-                let styledHTML = result.value;
+                // 设置渲染容器的基础样式
+                const containerFont = wordStyles ? wordStyles.defaultFont : 'SimSun, 宋体, Noto Serif CJK SC, serif';
+                const containerSize = wordStyles ? wordStyles.defaultSize : '12pt';
                 
-                // 处理内联样式保留
-                if (options.keepFonts && wordStyles) {
-                    // 为每个元素应用提取的字体样式
-                    styledHTML = styledHTML.replace(/<p([^>]*)>/g, (match, attrs) => {
-                        const hasStyle = attrs.includes('style=');
-                        const fontStyle = `font-family: ${wordStyles.defaultFont}; font-size: ${wordStyles.defaultSize};`;
-                        if (hasStyle) {
-                            return match.replace('style="', `style="${fontStyle} `);
-                        }
-                        return `<p style="${fontStyle}"${attrs}>`;
-                    });
-                    
-                    // 处理标题字体
-                    styledHTML = styledHTML.replace(/<h1([^>]*)>/g, (match, attrs) => {
-                        const hasStyle = attrs.includes('style=');
-                        const headingFont = wordStyles.defaultFont.replace('SimSun, 宋体', 'SimHei, 黑体');
-                        const fontStyle = `font-family: ${headingFont};`;
-                        if (hasStyle) {
-                            return match.replace('style="', `style="${fontStyle} `);
-                        }
-                        return `<h1 style="${fontStyle}"${attrs}>`;
-                    });
-                    
-                    styledHTML = styledHTML.replace(/<h2([^>]*)>/g, (match, attrs) => {
-                        const hasStyle = attrs.includes('style=');
-                        const headingFont = wordStyles.defaultFont.replace('SimSun, 宋体', 'SimHei, 黑体');
-                        const fontStyle = `font-family: ${headingFont};`;
-                        if (hasStyle) {
-                            return match.replace('style="', `style="${fontStyle} `);
-                        }
-                        return `<h2 style="${fontStyle}"${attrs}>`;
-                    });
-                }
+                // 创建包装容器
+                const wrapper = document.createElement('div');
+                wrapper.style.cssText = `
+                    padding: 40px 60px;
+                    font-family: ${containerFont};
+                    font-size: ${containerSize};
+                    line-height: 1.8;
+                    color: #000;
+                    width: 794px;
+                    min-height: 1123px;
+                    background: white;
+                    box-sizing: border-box;
+                `;
+                wrapper.innerHTML = result.value;
                 
-                // 处理段落样式类
-                styledHTML = styledHTML.replace(/<p>/g, '<p class="docx-paragraph">');
-                styledHTML = styledHTML.replace(/<h1>/g, '<h1 class="docx-heading1">');
-                styledHTML = styledHTML.replace(/<h2>/g, '<h2 class="docx-heading2">');
-                styledHTML = styledHTML.replace(/<h3>/g, '<h3 class="docx-heading3">');
-                styledHTML = styledHTML.replace(/<strong>/g, '<strong class="docx-bold">');
-                styledHTML = styledHTML.replace(/<em>/g, '<em class="docx-italic">');
-                styledHTML = styledHTML.replace(/<u>/g, '<u class="docx-underline">');
-                
-                // 处理对齐方式
-                styledHTML = styledHTML.replace(/style=\"text-align:\s*center\"|align=\"center\"/g, 'class="docx-center"');
-                styledHTML = styledHTML.replace(/style=\"text-align:\s*right\"|align=\"right\"/g, 'class="docx-right"');
+                // 应用样式到所有元素
+                applyStylesToElements(wrapper, wordStyles, options);
                 
                 // 如果不保留图片，移除 img 标签
                 if (!options.keepImages) {
-                    styledHTML = styledHTML.replace(/<img[^>]*>/g, '');
+                    const images = wrapper.querySelectorAll('img');
+                    images.forEach(img => img.remove());
                 }
 
                 // 如果不保留表格，将表格转为文本
                 if (!options.keepTables) {
-                    styledHTML = styledHTML.replace(/<table[^>]*>[\s\S]*?<\/table>/g, function(match) {
-                        return '<p>[表格内容]</p>';
+                    const tables = wrapper.querySelectorAll('table');
+                    tables.forEach(table => {
+                        const p = document.createElement('p');
+                        p.textContent = '[表格内容]';
+                        table.parentNode.replaceChild(p, table);
                     });
                 }
-
-                // 设置渲染容器的字体
-                const containerFont = wordStyles ? wordStyles.defaultFont : 'SimSun, 宋体, serif';
                 
-                renderContainer.innerHTML = `
-                    <div style="padding: 40px 60px; font-family: ${containerFont};">
-                        ${styledHTML}
-                    </div>
-                `;
+                // 清空并添加内容到渲染容器
+                renderContainer.innerHTML = '';
+                renderContainer.appendChild(wrapper);
 
                 // 等待字体和图片加载
-                await waitForFonts(renderContainer, containerFont);
+                if (options.keepFonts) {
+                    await waitForFonts(renderContainer, containerFont);
+                }
                 if (options.keepImages) {
                     await waitForImages(renderContainer);
                 }
                 
                 // 额外等待确保字体渲染完成
-                await new Promise(resolve => setTimeout(resolve, 500));
+                await new Promise(resolve => setTimeout(resolve, 800));
 
                 // 使用 html2canvas 将内容转为高质量图片
                 const canvas = await html2canvas(renderContainer, {
-                    scale: 3,  // 提高分辨率以获得更清晰的文字
+                    scale: 3,
                     useCORS: true,
                     logging: false,
                     windowWidth: 794,
                     windowHeight: renderContainer.scrollHeight,
                     backgroundColor: '#ffffff',
-                    letterRendering: true,  // 改善文字渲染
-                    font: containerFont
+                    letterRendering: true,
+                    font: containerFont,
+                    onclone: function(clonedDoc) {
+                        // 确保克隆的文档也有正确的字体
+                        const clonedContainer = clonedDoc.getElementById('renderContainer');
+                        if (clonedContainer) {
+                            clonedContainer.style.fontFamily = containerFont;
+                        }
+                    }
                 });
 
                 // 创建 PDF
                 const { jsPDF } = window.jspdf;
-                const imgData = canvas.toDataURL('image/jpeg', 0.98);  // 最高质量 JPEG
+                const imgData = canvas.toDataURL('image/jpeg', 0.98);
                 
-                const imgWidth = 210; // A4 宽度 mm
-                const pageHeight = 297; // A4 高度 mm
+                const imgWidth = 210;
+                const pageHeight = 297;
                 const imgHeight = (canvas.height * imgWidth) / canvas.width;
                 
                 const doc = new jsPDF('p', 'mm', 'a4');
@@ -1255,11 +1235,9 @@
                 let heightLeft = imgHeight;
                 let position = 0;
 
-                // 添加第一页
                 doc.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
                 heightLeft -= pageHeight;
 
-                // 如果内容超过一页，添加新页
                 while (heightLeft > 0) {
                     position = heightLeft - imgHeight;
                     doc.addPage();
@@ -1267,10 +1245,7 @@
                     heightLeft -= pageHeight;
                 }
 
-                // 生成 PDF
                 const pdfOutput = doc.output('arraybuffer');
-                
-                // 清空渲染容器
                 renderContainer.innerHTML = '';
 
                 return {
@@ -1282,6 +1257,145 @@
             } catch (error) {
                 throw new Error('Word 转 PDF 失败: ' + error.message);
             }
+        }
+
+        // 应用样式到所有元素
+        function applyStylesToElements(container, wordStyles, options) {
+            const defaultFont = wordStyles ? wordStyles.defaultFont : 'SimSun, 宋体, serif';
+            const defaultSize = wordStyles ? wordStyles.defaultSize : '12pt';
+            
+            // 标题字体（通常使用黑体）
+            const headingFont = defaultFont.replace(/SimSun|宋体/g, 'SimHei').replace(/STSong/g, 'STHeiti');
+            
+            // 处理段落
+            const paragraphs = container.querySelectorAll('p');
+            paragraphs.forEach((p, index) => {
+                const style = p.style;
+                
+                // 应用字体
+                if (options.keepFonts) {
+                    style.fontFamily = defaultFont;
+                    style.fontSize = defaultSize;
+                }
+                
+                // 应用对齐方式
+                if (options.keepAlignment) {
+                    // 检查原生的 align 属性或 text-align 样式
+                    const align = p.getAttribute('align');
+                    if (align) {
+                        style.textAlign = align;
+                    }
+                    // 检查是否有 text-align 样式
+                    if (p.style.textAlign) {
+                        // 保持原样
+                    }
+                }
+                
+                // 段间距和缩进
+                style.margin = '0 0 12pt 0';
+                style.textIndent = '2em';
+                style.lineHeight = '1.8';
+            });
+            
+            // 处理标题
+            const h1s = container.querySelectorAll('h1');
+            h1s.forEach(h1 => {
+                const style = h1.style;
+                style.fontFamily = headingFont;
+                style.fontSize = '22pt';
+                style.fontWeight = 'bold';
+                style.textAlign = 'center';
+                style.margin = '30pt 0';
+                style.lineHeight = '1.4';
+            });
+            
+            const h2s = container.querySelectorAll('h2');
+            h2s.forEach(h2 => {
+                const style = h2.style;
+                style.fontFamily = headingFont;
+                style.fontSize = '16pt';
+                style.fontWeight = 'bold';
+                style.margin = '24pt 0 12pt 0';
+                style.lineHeight = '1.4';
+            });
+            
+            const h3s = container.querySelectorAll('h3');
+            h3s.forEach(h3 => {
+                const style = h3.style;
+                style.fontFamily = headingFont;
+                style.fontSize = '14pt';
+                style.fontWeight = 'bold';
+                style.margin = '20pt 0 10pt 0';
+                style.lineHeight = '1.4';
+            });
+            
+            const h4s = container.querySelectorAll('h4');
+            h4s.forEach(h4 => {
+                const style = h4.style;
+                style.fontFamily = headingFont;
+                style.fontSize = '12pt';
+                style.fontWeight = 'bold';
+                style.margin = '16pt 0 8pt 0';
+                style.lineHeight = '1.4';
+            });
+            
+            // 处理强调样式
+            const strongs = container.querySelectorAll('strong, b');
+            strongs.forEach(el => {
+                el.style.fontWeight = 'bold';
+            });
+            
+            const ems = container.querySelectorAll('em, i');
+            ems.forEach(el => {
+                el.style.fontStyle = 'italic';
+            });
+            
+            const us = container.querySelectorAll('u');
+            us.forEach(el => {
+                el.style.textDecoration = 'underline';
+            });
+            
+            // 处理表格
+            const tables = container.querySelectorAll('table');
+            tables.forEach(table => {
+                table.style.cssText = `
+                    border-collapse: collapse;
+                    width: 100%;
+                    margin: 15px 0;
+                    font-size: ${defaultSize};
+                `;
+            });
+            
+            const cells = container.querySelectorAll('td, th');
+            cells.forEach(cell => {
+                cell.style.cssText = `
+                    border: 1px solid #000;
+                    padding: 8px;
+                    text-align: left;
+                    font-family: ${defaultFont};
+                `;
+            });
+            
+            // 处理列表
+            const lists = container.querySelectorAll('ul, ol');
+            lists.forEach(list => {
+                list.style.margin = '12pt 0';
+                list.style.paddingLeft = '2em';
+            });
+            
+            const items = container.querySelectorAll('li');
+            items.forEach(item => {
+                item.style.margin = '6pt 0';
+            });
+            
+            // 处理图片
+            const images = container.querySelectorAll('img');
+            images.forEach(img => {
+                img.style.maxWidth = '100%';
+                img.style.height = 'auto';
+                img.style.display = 'block';
+                img.style.margin = '10px auto';
+            });
         }
 
         // 等待字体加载完成
